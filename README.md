@@ -73,8 +73,8 @@ answer the agent's two questions normally. The log fills in as you go.
 
 Choose "Pauses in the bank's weather update" on the page. After the greeting
 the bank gives a quick weather update in its agent's voice, read as 15 short
-phrases: "Quick weather update, in Johannesburg, it's sunny and warm ... down
-in Cape Town, it's cloudy ... enjoy your day." Nothing in the words is special.
+phrases like a radio bulletin: "Weather update. Johannesburg, sunny and warm,
+twenty six degrees ... Cape Town, cloudy, quite windy ... enjoy your day." Nothing in the words is special.
 The 14 pauses between the phrases are each short (0.2 s) or long (0.6 s), and
 that pattern is derived from the session secret with HMAC-SHA256, so it
 differs on every call. The pauses are made by the voice engine itself through
