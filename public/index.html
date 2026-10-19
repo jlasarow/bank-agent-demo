@@ -161,9 +161,27 @@ function showLogin() {
   $("enrolCard").style.display = "none"; $("loginCard").style.display = "";
 }
 
+// The demo server keeps enrolments in memory, so after a redeploy it forgets
+// this phone. Re-register the same key silently when that happens.
+async function ensureEnrolled() {
+  const publicJwk = await subtle.exportKey("jwk", device.keyPair.publicKey);
+  const bank = await api("/api/bank-key");
+  await api("/api/enrol", { deviceId: device.deviceId, phone: device.phone, name: device.name, publicJwk });
+  if (JSON.stringify(bank.publicJwk) !== JSON.stringify(device.bankJwk)) {
+    device.bankJwk = bank.publicJwk; await kvSet("device", device);
+    bankKey = await subtle.importKey("jwk", bank.publicJwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+  }
+}
+
 async function login(broken, context) {
   if (!device) return;
   resetSessionView();
+  setTick("warn", "Working", "Contacting the bank...");
+  try { await loginInner(broken, context); }
+  catch (e) { setTick("bad", "Something went wrong", e.message); }
+}
+async function loginInner(broken, context) {
+  await ensureEnrolled();
   const start = await api("/api/login/start", { deviceId: device.deviceId, context });
   let signature = null;
   if (!broken) signature = b64(await subtle.sign({ name: "ECDSA", hash: "SHA-256" }, device.keyPair.privateKey, new TextEncoder().encode(start.textToSign)));
