@@ -73,25 +73,39 @@ app.post("/api/delegate", async (req, res) => {
 app.get("/api/delegate-text/:deviceId", (req, res) => res.json({ text: trust.delegationText(req.params.deviceId) }));
 
 // Generate the bank's weather update for a throwaway session and decode it.
-// ?audio=1 returns the audio itself as a WAV so it can be listened to.
-let lastSelfTest = 0;
-app.get("/api/demo/pause-check", async (req, res) => {
-  if (Date.now() - lastSelfTest < 5000) return res.status(429).json({ error: "wait a few seconds" });
-  lastSelfTest = Date.now();
-  try {
+// ?audio=1 returns the audio itself as a WAV so it can be listened to. The
+// last sample is kept for a minute, so an audio player that asks for the file
+// more than once (most do) gets the same clip instead of a new generation.
+let pauseSample = null;   // { at, json, wavPath }
+let pauseSampleBusy = null;
+async function freshPauseSample() {
+  if (pauseSample && Date.now() - pauseSample.at < 60000) return pauseSample;
+  if (pauseSampleBusy) return pauseSampleBusy;
+  pauseSampleBusy = (async () => {
     const r = await tel.pauseSelfTest();
-    if (req.query.audio) {
-      const pcm = Buffer.alloc(r.audio.length * 2);
-      for (let i = 0; i < r.audio.length; i++) pcm.writeInt16LE(Math.round(require("./lib/tonecodec").mulawToLinear(r.audio[i]) * 32767), i * 2);
-      const h = Buffer.alloc(44);
-      h.write("RIFF", 0); h.writeUInt32LE(36 + pcm.length, 4); h.write("WAVE", 8); h.write("fmt ", 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
-      h.writeUInt32LE(8000, 24); h.writeUInt32LE(16000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write("data", 36); h.writeUInt32LE(pcm.length, 40);
-      res.setHeader("content-type", "audio/wav"); return res.send(Buffer.concat([h, pcm]));
-    }
-    const { audio, ...rest } = r;
-    res.json(rest);
+    const T = require("./lib/tonecodec");
+    const pcm = Buffer.alloc(r.audio.length * 2);
+    for (let i = 0; i < r.audio.length; i++) pcm.writeInt16LE(Math.round(T.mulawToLinear(r.audio[i]) * 32767), i * 2);
+    const h = Buffer.alloc(44);
+    h.write("RIFF", 0); h.writeUInt32LE(36 + pcm.length, 4); h.write("WAVE", 8); h.write("fmt ", 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
+    h.writeUInt32LE(8000, 24); h.writeUInt32LE(16000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write("data", 36); h.writeUInt32LE(pcm.length, 40);
+    const wavPath = require("path").join(require("os").tmpdir(), "bank-weather-sample.wav");
+    require("fs").writeFileSync(wavPath, Buffer.concat([h, pcm]));
+    const { audio, ...json } = r;
+    pauseSample = { at: Date.now(), json, wavPath };
+    return pauseSample;
+  })().finally(() => { pauseSampleBusy = null; });
+  return pauseSampleBusy;
+}
+app.get("/api/demo/pause-check", async (req, res) => {
+  try {
+    const s = await freshPauseSample();
+    if (req.query.audio) return res.sendFile(s.wavPath, { headers: { "content-type": "audio/wav", "cache-control": "no-store" } });
+    res.json(s.json);
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
+// a page with a player, so the clip opens the same way on a phone or laptop
+app.get("/weather", (req, res) => res.type("html").send(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bank weather update</title></head><body style="font-family:system-ui;background:#0f1b2d;color:#eef3fa;padding:20px"><h2>The bank's weather update</h2><p>This is what the bank says on the call. The short and long pauses between the phrases carry that call's one-time code.</p><audio controls autoplay src="/api/demo/pause-check?audio=1" style="width:100%"></audio><p><a style="color:#4ea1ff" href="/weather">Make a new one</a></p></body></html>`));
 
 // handset measured the gaps between the bank's words and reports them (Patent 2)
 app.post("/api/session/:id/heard-pauses", async (req, res) => {
