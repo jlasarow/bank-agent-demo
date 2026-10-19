@@ -14,6 +14,7 @@ const { WebSocketServer } = require("ws");
 const trust = require("./lib/trust");
 const tel = require("./lib/telephony");
 const assistant = require("./lib/assistant");
+const virtualcall = require("./lib/virtualcall");
 
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -26,7 +27,7 @@ app.get("/healthz", (req, res) => res.send("ok"));
 app.get("/api/bank-key", (req, res) => res.json({ name: "Demo Bank", publicJwk: trust.bankPublicJwk() }));
 
 // ---- what this server can do (the page hides the divert toggle if unavailable) ----
-app.get("/api/config", (req, res) => res.json({ telephony: tel.configured(), divertAvailable: tel.divertAvailable() && assistant.assistantReady() }));
+app.get("/api/config", (req, res) => res.json({ telephony: tel.configured(), divertAvailable: tel.divertAvailable() && assistant.assistantReady(), divertMode: tel.divertMode() }));
 
 // ---- device enrolment ----
 app.post("/api/enrol", (req, res) => {
@@ -37,7 +38,7 @@ app.post("/api/enrol", (req, res) => {
 // ---- login: challenge then signature ----
 app.post("/api/login/start", async (req, res) => {
   try {
-    const s = await trust.startLogin(req.body.deviceId, req.body.context, { divert: !!req.body.divert });
+    const s = await trust.startLogin(req.body.deviceId, req.body.context, { divert: !!req.body.divert, method: req.body.method });
     res.json({ sessionId: s.id, challenge: s.challenge, textToSign: `login:${s.id}:${s.challenge}` });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -64,10 +65,21 @@ app.post("/api/session/:id/heard", async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// handset measured the gaps between the bank's words and reports them (Patent 2)
+app.post("/api/session/:id/heard-pauses", async (req, res) => {
+  try { res.json(await trust.confirmHeardPauses(req.params.id, req.body.gapsMs)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // play the recording of a diverted (agent-to-agent) call
 app.get("/api/session/:id/recording", async (req, res) => {
   const s = trust.getSession(req.params.id);
   if (!s || !s.recording) return res.status(404).json({ error: "no recording" });
+  if (s.recording.internal) {
+    const w = virtualcall.getRecording(s.id);
+    if (!w) return res.status(404).json({ error: "recording expired" });
+    return res.set("content-type", "audio/wav").send(w);
+  }
   try {
     const r = await tel.fetchRecording(s);
     if (!r) return res.status(502).json({ error: "recording not available yet" });
@@ -134,6 +146,10 @@ function handleAppSocket(ws, sessionId) {
   const unsub = trust.subscribe(sessionId, entry => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "entry", entry, session: trust.publicView(trust.getSession(sessionId)) }));
   });
-  ws.on("close", unsub);
-  ws.on("error", unsub);
+  // live audio of an in-server agent-to-agent call, 100 ms mu-law chunks
+  const unlisten = virtualcall.listen(sessionId, chunk => {
+    if (ws.readyState === ws.OPEN && ws.bufferedAmount < 1e6) ws.send(JSON.stringify({ type: "audio", mulaw: chunk }));
+  });
+  ws.on("close", () => { unsub(); unlisten(); });
+  ws.on("error", () => { unsub(); unlisten(); });
 }

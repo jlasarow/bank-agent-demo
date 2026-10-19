@@ -61,18 +61,41 @@ answer the agent's two questions normally. The log fills in as you go.
     server.js           HTTP, WebSocket upgrade, API routes
     lib/trust.js        enrolment, challenges, signatures, signed audit chain
     lib/telephony.js    Twilio outbound call, media stream bridge, ElevenLabs agent, tone injection
-    lib/assistant.js    customer-side AI agent for diverted calls, server-side tone decode
+    lib/assistant.js    customer-side AI agent for diverted calls, server-side tone and pause decode
+    lib/virtualcall.js  in-server call between the two agents, recording, live audio
+    lib/pausecodec.js   Patent 2 word-gap detector and matching (copy in public/lib)
     lib/analysis.js     Patent 2 measurements
     lib/tonecodec.js    narrowband codec shared by server and browser (copy in public/lib)
     public/index.html   the phone screen
     test/               codec and bridge self-tests
 
+## Proof by pauses between words (Patent 2)
+
+Choose "Pauses between words" on the page. After the greeting the bank reads
+one ordinary sentence in its agent's voice: "This is Demo Bank and your app
+is now checking the rhythm of these words to confirm the call". Nothing in
+the words is special. The 18 gaps between them are each short (180 ms) or
+long (620 ms), and that pattern is derived from the session secret with
+HMAC-SHA256, so it differs on every call. The listener measures the gaps
+(lib/pausecodec.js, shared by the browser and the server) and reports them
+over the data link; the bank compares them with the pattern it expected,
+tolerating up to two misjudged gaps, and signs only if they match. A replayed
+recording carries an old session's pattern and is rejected. If the speech
+service fails the call falls back to tones.
+
+Measured gaps run longer than the inserted ones, so the short/long split is
+taken from each sentence's own gaps rather than a fixed threshold. Heavy
+background noise fills the gaps; in a very noisy room the tone is more robust.
+
 ## Divert to my AI
 
-Tick "Divert bank calls to my AI" on the page. A flagged login then makes the
-bank's agent dial `TWILIO_ASSISTANT_NUMBER` instead of the handset. That
-number is answered by a second ElevenLabs agent speaking for the customer
-(lib/assistant.js). It decodes the rendezvous tone straight from the call
+Tick "Divert bank calls to my AI" on the page. A flagged login then connects
+the bank's agent to a second ElevenLabs agent speaking for the customer
+(lib/assistant.js). By default (`DIVERT_MODE=internal`) the two are joined
+inside this server by lib/virtualcall.js, which plays each side to the other
+in real time as 8 kHz phone audio, records the call, and streams it live to
+the page. With `DIVERT_MODE=phone` the bank dials `TWILIO_ASSISTANT_NUMBER`
+as a real call instead. It decodes the rendezvous tone straight from the call
 audio, confirms the code over the data link, checks the bank's signature
 against the pinned key, and only then treats the caller as Demo Bank. It
 never gives out PINs, codes or card details either way. A forged or missing
