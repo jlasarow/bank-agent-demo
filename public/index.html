@@ -85,10 +85,10 @@
   </div>
   <div class="small" style="margin-top:12px">What carries the proof in the call</div>
   <div class="seg">
-    <label><input type="radio" name="method" value="tones" checked> Tones (Patent 1)</label>
-    <label><input type="radio" name="method" value="pauses"> Pauses between words (Patent 2)</label>
+    <label><input type="radio" name="method" value="pauses" checked> Pauses between words (Patent 2)</label>
+    <label><input type="radio" name="method" value="tones"> Tones (Patent 1)</label>
   </div>
-  <label class="toggle" id="divertRow" style="display:none"><input type="checkbox" id="divert"> <span><b>Divert bank calls to my AI</b><br><span class="small">The bank calls your AI assistant instead of this phone. It hears the tone directly in the call audio and only accepts the caller once the bank's signature checks out.</span></span></label>
+  <label class="toggle" id="divertRow" style="display:none"><input type="checkbox" id="divert"> <span><b>Divert bank calls to my AI</b><br><span class="small">The bank calls your AI assistant instead of this phone. It checks the bank's proof straight from the call audio and only accepts the caller once the bank's signature checks out.</span></span></label>
 </div>
 
 <div class="card" id="statusCard" style="display:none">
@@ -196,7 +196,7 @@ async function ensureEnrolled() {
 }
 
 let divertOn = false;
-let method = "tones";
+let method = "pauses";
 const methodName = () => method === "pauses" ? "the pauses between the bank's words" : "the bank's tone";
 document.querySelectorAll('input[name=method]').forEach(r => r.onchange = async () => { method = r.value; try { await kvSet("method", method); } catch {} });
 
@@ -218,9 +218,10 @@ function playLive(b64) {
 }
 $("btnMute").onclick = () => { liveMuted = !liveMuted; $("btnMute").textContent = liveMuted ? "Unmute" : "Mute"; };
 
-function drawPattern(heard, expected) {
+function drawPattern(heard, expected, reading) {
   const row = (bits, ref) => `<div class="bits">${bits.split("").map((b, i) => `<i class="${b === "1" ? "l" : "s"} ${ref ? (ref[i] === b ? "ok" : "bad") : ""}"></i>`).join("")}</div>`;
-  $("pattern").innerHTML = `Gaps heard (short or long):${row(heard, expected)}` + (expected ? `Pattern the bank expected from the session key:${row(expected)}` : "");
+  $("pattern").innerHTML = (reading ? `<div style="color:var(--ink);font-size:13px;margin-bottom:6px"><b>Code found in the words</b> (· short gap, ——— long gap):<br>${reading}</div>` : "")
+    + `Gaps heard (short or long):${row(heard, expected)}` + (expected ? `Pattern the bank expected from the session key:${row(expected)}` : "");
 }
 $("divert").onchange = async () => { divertOn = $("divert").checked; try { await kvSet("divert", divertOn); } catch {} };
 
@@ -279,7 +280,7 @@ function addEntry(e) {
   else if (type === "customer_said") detail = `You: "${rest.text}"`;
   else if (type === "customer_agent_said") detail = `Your AI: "${rest.text}"`;
   else if (type === "pause_sentence_sent") detail = `"${rest.sentence}" · ${rest.gaps} gaps · ${(rest.airtimeMs / 1000).toFixed(1)} s`;
-  else if (type === "pauses_matched") detail = `heard ${rest.heard} · expected ${rest.expected} · ${rest.errors} off · by ${rest.heardBy}`;
+  else if (type === "pauses_matched") detail = `Code found in the words: "${rest.reading}" · heard ${rest.heard} · expected ${rest.expected} · ${rest.errors} off · by ${rest.heardBy}`;
   else if (type === "customer_turn_measured") { addTurn(rest); detail = `reply ${rest.replyLatencyMs ?? "?"} ms, contour ${rest.contour}`; }
   else detail = Object.entries(rest).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · ");
   if (type.startsWith("customer_agent") || type === "tone_heard_by_customer_agent") li.className = "ai";
@@ -289,12 +290,12 @@ function addEntry(e) {
   if (type === "call_placed" && rest.internal) setTick("warn", "Bank is calling your AI", "The two agents are being connected. Turn your sound on to listen.");
   if (type === "call_answered" && !(session && session.divert)) $("statusSub").textContent = "Call answered. Listening for " + methodName() + " after the greeting.";
   if (type === "pause_sentence_sent") $("statusSub").textContent = "The bank is reading a sentence. Stay quiet: the gaps between its words are the proof.";
-  if (type === "pauses_matched") drawPattern(rest.heard, rest.expected);
+  if (type === "pauses_matched") drawPattern(rest.heard, rest.expected, rest.reading);
   if (type === "pause_mismatch") drawPattern(rest.heard, null);
   if (type === "pauses_heard_by_customer_agent") $("statusSub").textContent = "Your AI measured the gaps between the bank's words. Checking with the bank.";
   if (type === "bank_verified") { setTick("ok", "Demo Bank, verified", "The voice on the line is the party on the data link."); $("banner").classList.remove("on"); }
   if (type === "session_closed") { $("statusSub").textContent = rest.outcome; stopListening(); setTimeout(() => $("live").classList.remove("on"), 1500); }
-  if (type === "customer_agent_answered") setTick("warn", "Your AI answered", "Listening for the bank's tone in the call audio.");
+  if (type === "customer_agent_answered") setTick("warn", "Your AI answered", "Listening to the bank's words for the proof.");
   if (type === "tone_heard_by_customer_agent") $("statusSub").textContent = "Your AI heard the tone. Checking with the bank over the data link.";
   if (type === "customer_agent_verified_bank") setTick("ok", "Demo Bank, verified by your AI", "Tone matched and the bank signature checked out against the pinned key.");
   if (type === "customer_agent_rejected_caller") setTick("bad", "Caller not verified", rest.reason || "Your AI did not accept the caller.");
@@ -349,7 +350,7 @@ async function onPauses(u) {
     if (!r.ok) { drawPattern(r.heardBits, null); $("micStatus").innerHTML = `<span class="bad">The gaps did not match this session's pattern (${r.errors} off).</span>`; return; }
     const okSig = await subtle.verify({ name: "ECDSA", hash: "SHA-256" }, bankKey, b64d(r.bankSignature), new TextEncoder().encode(r.text));
     pauseDone = true;
-    drawPattern(r.heardBits, r.expectedBits);
+    drawPattern(r.heardBits, r.expectedBits, r.reading);
     if (okSig) $("micStatus").innerHTML = `<span class="ok">Gap pattern matched (${r.errors} off) and bank signature verified with the pinned key.</span>`;
     else { $("micStatus").innerHTML = `<span class="bad">Bank signature failed to verify.</span>`; setTick("bad", "Not the bank", "Signature did not match the pinned bank key."); }
   } catch (e) { $("micStatus").textContent = "Check failed: " + e.message; }
