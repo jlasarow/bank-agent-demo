@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Demo Bank</title>
+<meta name="description" content="Untapped AI bank agent demonstration: the bank calls you, your phone proves it is the bank.">
+<style>
+  :root{--bg:#0f1b2d;--card:#162741;--ink:#eef3fa;--mute:#9fb0c8;--line:#24375a;--ok:#2fd27a;--warn:#f4b942;--bad:#ff5c5c;--accent:#4ea1ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,system-ui,Segoe UI,Roboto,sans-serif;padding:16px;padding-bottom:40px}
+  h1{font-size:20px;margin:0 0 2px}
+  .sub{color:var(--mute);font-size:13px;margin-bottom:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  button{flex:1;min-width:120px;background:var(--accent);color:#06101f;border:0;border-radius:10px;padding:12px;font-weight:600;font-size:15px}
+  button.secondary{background:#243a5e;color:var(--ink)}
+  button.danger{background:#5c2b2b;color:#ffd4d4}
+  button:disabled{opacity:.45}
+  input{width:100%;background:#0d1729;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:11px;font-size:15px;margin-top:6px}
+  label{font-size:12px;color:var(--mute)}
+  .status{display:flex;align-items:center;gap:12px}
+  .tick{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;font-size:34px;background:#243a5e;color:var(--mute);flex:none}
+  .tick.ok{background:var(--ok);color:#05200f}
+  .tick.warn{background:var(--warn);color:#2a1d00}
+  .tick.bad{background:var(--bad);color:#2a0000}
+  .big{font-size:18px;font-weight:700}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px}
+  .kv span:first-child{color:var(--mute)}
+  .chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600}
+  .chip.open{background:#2b4a2f;color:#b8f5c6}.chip.closed{background:#3a3a3a;color:#ddd}.chip.flagged{background:#5c2b2b;color:#ffd4d4}.chip.verified{background:#1f4d33;color:#b8f5c6}
+  .log{list-style:none;margin:0;padding:0;font-size:13px}
+  .log li{padding:8px 0;border-top:1px solid var(--line);display:grid;grid-template-columns:62px 1fr;gap:8px}
+  .log li:first-child{border-top:0}
+  .log time{color:var(--mute);font-variant-numeric:tabular-nums;font-size:12px}
+  .log .t{font-weight:600}
+  .log .d{color:var(--mute);font-size:12px;word-break:break-word}
+  .sig{color:#5f7398;font-family:ui-monospace,Menlo,monospace;font-size:11px}
+  .meter{height:6px;background:#0d1729;border-radius:3px;overflow:hidden;margin-top:8px}
+  .meter i{display:block;height:100%;width:0;background:var(--accent);transition:width .1s}
+  .banner{display:none;background:#1f3a66;border:1px solid #3a63a8;border-radius:12px;padding:12px;margin-bottom:12px;font-weight:600}
+  .banner.on{display:block}
+  .small{font-size:12px;color:var(--mute)}
+  .ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+</style>
+</head>
+<body>
+<h1>Demo Bank</h1>
+<div class="sub">Untapped AI voice trust demonstration. Not a real bank.</div>
+
+<div class="banner" id="banner">Demo Bank is calling you now to confirm a change. Answer on speaker so this screen can hear the call.</div>
+
+<div class="card" id="enrolCard">
+  <div class="big">1. Enrol this phone</div>
+  <label>Your name<input id="name" placeholder="Judd" autocomplete="off"></label>
+  <label>Mobile number the bank will call, with country code<input id="phone" placeholder="+27..." inputmode="tel" autocomplete="off"></label>
+  <div class="row" style="margin-top:10px">
+    <button id="btnEnrol">Create key in this phone and enrol</button>
+  </div>
+  <div class="small" id="enrolStatus" style="margin-top:8px"></div>
+</div>
+
+<div class="card" id="loginCard" style="display:none">
+  <div class="big">2. Log in</div>
+  <div class="small">A real login signs the bank's challenge with the key in this phone. The broken-key button simulates a phone whose biometrics changed, or a SIM swapped onto a stranger's handset. That flags the login and the bank calls you.</div>
+  <div class="row" style="margin-top:10px">
+    <button id="btnLogin">Log in with my key</button>
+    <button id="btnBroken" class="danger">Log in with a broken key</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="btnWebsite" class="secondary">Simulate a website login</button>
+    <button id="btnReset" class="secondary">Forget this phone</button>
+  </div>
+</div>
+
+<div class="card" id="statusCard" style="display:none">
+  <div class="status">
+    <div class="tick" id="tick">?</div>
+    <div>
+      <div class="big" id="statusTitle">Waiting</div>
+      <div class="small" id="statusSub"></div>
+    </div>
+  </div>
+  <div class="meter"><i id="micMeter"></i></div>
+  <div class="small" id="micStatus" style="margin-top:6px">Microphone off</div>
+  <div class="row" style="margin-top:10px">
+    <button id="btnListen" class="secondary">Start listening for the bank's tone</button>
+  </div>
+</div>
+
+<div class="card" id="sessionCard" style="display:none">
+  <div class="big" style="margin-bottom:8px">Live audit log <span class="chip open" id="chip">open</span></div>
+  <div class="kv">
+    <span>Session</span><b id="kSession"></b>
+    <span>Counterparty</span><span id="kParty">Demo Bank (unverified)</span>
+    <span>Initiated</span><span id="kInit"></span>
+    <span>Call placed</span><span id="kPlaced">-</span>
+    <span>Answered</span><span id="kAnswered">-</span>
+    <span>Closed</span><span id="kClosed">-</span>
+  </div>
+  <div class="big" style="margin:12px 0 4px;font-size:15px">Requests and events</div>
+  <ul class="log" id="log"></ul>
+</div>
+
+<div class="card" id="turnsCard" style="display:none">
+  <div class="big" style="font-size:15px">Liveness measurements (Patent 2, logged only)</div>
+  <ul class="log" id="turns"></ul>
+</div>
+
+<script src="/lib/tonecodec.js"></script>
+<script>
+(() => {
+"use strict";
+const $ = id => document.getElementById(id);
+const subtle = crypto.subtle;
+const api = (p, body) => fetch(p, { method: body ? "POST" : "GET", headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined }).then(async r => { const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j; });
+
+// ---- key storage: non-extractable ECDSA key kept in IndexedDB ----
+// On a production app this lives in the Secure Enclave or StrongBox with a
+// biometric gate. In a web page the best available is a non-extractable
+// WebCrypto key in IndexedDB, which never leaves this browser profile.
+function idb() { return new Promise((res, rej) => { const r = indexedDB.open("demobank", 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function kvGet(k) { const db = await idb(); return new Promise((res, rej) => { const t = db.transaction("kv").objectStore("kv").get(k); t.onsuccess = () => res(t.result); t.onerror = () => rej(t.error); }); }
+async function kvSet(k, v) { const db = await idb(); return new Promise((res, rej) => { const t = db.transaction("kv", "readwrite").objectStore("kv").put(v, k); t.onsuccess = () => res(); t.onerror = () => rej(t.error); }); }
+async function kvClear() { const db = await idb(); return new Promise((res) => { const t = db.transaction("kv", "readwrite").objectStore("kv").clear(); t.onsuccess = () => res(); }); }
+
+let device = null;   // { deviceId, name, phone, keyPair, bankJwk }
+let bankKey = null;  // CryptoKey for verifying bank signatures
+let session = null, ws = null;
+
+function b64(buf) { return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+function b64d(s) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+
+async function loadDevice() {
+  const d = await kvGet("device");
+  if (!d) return null;
+  bankKey = await subtle.importKey("jwk", d.bankJwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+  return d;
+}
+
+$("btnEnrol").onclick = async () => {
+  const name = $("name").value.trim() || "Customer", phone = $("phone").value.trim();
+  if (!/^\+\d{9,15}$/.test(phone)) { $("enrolStatus").textContent = "Enter the number with country code, for example +27821234567"; return; }
+  $("btnEnrol").disabled = true;
+  try {
+    const keyPair = await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
+    const publicJwk = await subtle.exportKey("jwk", keyPair.publicKey);
+    const deviceId = "web-" + crypto.getRandomValues(new Uint32Array(2)).join("");
+    const bank = await api("/api/bank-key");
+    await api("/api/enrol", { deviceId, phone, name, publicJwk });
+    device = { deviceId, name, phone, keyPair, bankJwk: bank.publicJwk };
+    await kvSet("device", device);
+    bankKey = await subtle.importKey("jwk", bank.publicJwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+    $("enrolStatus").innerHTML = `<span class="ok">Enrolled.</span> Private key generated in this phone, public key registered with the bank, bank key pinned.`;
+    showLogin();
+  } catch (e) { $("enrolStatus").textContent = "Enrolment failed: " + e.message; }
+  $("btnEnrol").disabled = false;
+};
+
+function showLogin() {
+  $("enrolCard").style.display = "none"; $("loginCard").style.display = "";
+}
+
+async function login(broken, context) {
+  if (!device) return;
+  resetSessionView();
+  const start = await api("/api/login/start", { deviceId: device.deviceId, context });
+  let signature = null;
+  if (!broken) signature = b64(await subtle.sign({ name: "ECDSA", hash: "SHA-256" }, device.keyPair.privateKey, new TextEncoder().encode(start.textToSign)));
+  openSession(start.sessionId);
+  const r = await api("/api/login/finish", { sessionId: start.sessionId, signature });
+  if (r.ok) setTick("ok", "Logged in", "Device signature valid. No OTP, no SMS.");
+  else { setTick("bad", "Login flagged", "This phone could not sign. The bank is calling you."); $("banner").classList.add("on"); startListening(); }
+}
+$("btnLogin").onclick = () => login(false, "app");
+$("btnBroken").onclick = () => login(true, "app, key invalidated");
+$("btnWebsite").onclick = () => login(true, "website login from a laptop, phone did not confirm");
+$("btnReset").onclick = async () => { await kvClear(); location.reload(); };
+
+// ---- session view and live log ----
+function resetSessionView() { $("log").innerHTML = ""; $("turns").innerHTML = ""; $("banner").classList.remove("on"); $("kParty").textContent = "Demo Bank (unverified)"; ["kPlaced", "kAnswered", "kClosed"].forEach(k => $(k).textContent = "-"); }
+function setTick(cls, title, sub) { const t = $("tick"); t.className = "tick " + cls; t.textContent = cls === "ok" ? "✓" : cls === "bad" ? "!" : cls === "warn" ? "…" : "?"; $("statusTitle").textContent = title; $("statusSub").textContent = sub; $("statusCard").style.display = ""; }
+function fmt(iso) { return iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "-"; }
+
+function openSession(id) {
+  if (ws) ws.close();
+  $("sessionCard").style.display = ""; $("kSession").textContent = id; $("kInit").textContent = fmt(new Date().toISOString());
+  ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws?session=" + id);
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === "snapshot") { session = m.session; m.log.forEach(addEntry); applySession(m.session); }
+    if (m.type === "entry") { addEntry(m.entry); applySession(m.session); }
+  };
+}
+function applySession(s) {
+  session = s;
+  const chip = $("chip"); chip.textContent = s.status; chip.className = "chip " + (s.status === "closed" ? "closed" : s.status === "flagged" ? "flagged" : s.status === "verified" ? "verified" : "open");
+  if (s.call) { $("kPlaced").textContent = fmt(s.call.placedAt); $("kAnswered").textContent = fmt(s.call.answeredAt); $("kClosed").textContent = fmt(s.call.endedAt); }
+  if (s.status === "closed" && !s.call) $("kClosed").textContent = fmt(new Date().toISOString());
+  if (s.bankVerified) $("kParty").innerHTML = `<span class="ok">Demo Bank, verified</span>`;
+}
+function addEntry(e) {
+  const li = document.createElement("li");
+  const { seq, sessionId, at, type, prevHash, hash, bankSignature, ...rest } = e;
+  let detail = "";
+  if (type === "agent_turn") detail = `Agent: "${rest.text}" · request: ${rest.request} · ${rest.authorised ? '<span class="ok">authorised</span>' : '<span class="bad">NOT authorised</span>'}`;
+  else if (type === "customer_said") detail = `You: "${rest.text}"`;
+  else if (type === "customer_turn_measured") { addTurn(rest); detail = `reply ${rest.replyLatencyMs ?? "?"} ms, contour ${rest.contour}`; }
+  else detail = Object.entries(rest).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · ");
+  li.innerHTML = `<time>${fmt(at)}</time><div><div class="t">${type.replace(/_/g, " ")}</div><div class="d">${detail}</div><div class="sig">#${seq} ${hash.slice(0, 10)} signed ${bankSignature.slice(0, 10)}…</div></div>`;
+  $("log").appendChild(li);
+  if (type === "call_placed") setTick("warn", "Bank is calling", "Answer on speaker. Listening for the bank's tone.");
+  if (type === "call_answered") $("statusSub").textContent = "Call answered. Listening for the tone under the greeting.";
+  if (type === "bank_verified") { setTick("ok", "Demo Bank, verified", "The voice on the line is the party on the data link."); $("banner").classList.remove("on"); }
+  if (type === "session_closed") { $("statusSub").textContent = rest.outcome; stopListening(); }
+}
+function addTurn(t) {
+  $("turnsCard").style.display = "";
+  const li = document.createElement("li");
+  li.innerHTML = `<time>turn ${t.agentTurn}</time><div><div class="t">reply latency ${t.replyLatencyMs ?? "n/a"} ms · ${t.utteranceMs} ms spoken</div><div class="d">pitch ${t.startPitchHz ?? "?"} → ${t.endPitchHz ?? "?"} Hz, ${t.contour} · ~${t.bitsOfEvidence} bits of evidence</div></div>`;
+  $("turns").appendChild(li);
+}
+
+// ---- microphone listener: decodes the tone and reports the code ----
+let audioCtx = null, mediaStream = null, decoder = null, proc = null;
+async function startListening() {
+  if (audioCtx) return;
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = audioCtx.createMediaStreamSource(mediaStream);
+    decoder = ToneCodec.createDecoder(audioCtx.sampleRate, onHeard, { minSNR: 3.5 });
+    proc = audioCtx.createScriptProcessor(2048, 1, 1);
+    proc.onaudioprocess = ev => {
+      const data = ev.inputBuffer.getChannelData(0);
+      decoder.feed(new Float32Array(data));
+      let s = 0; for (let i = 0; i < data.length; i += 8) s += data[i] * data[i];
+      $("micMeter").style.width = Math.min(100, Math.sqrt(s / (data.length / 8)) * 400) + "%";
+    };
+    src.connect(proc); proc.connect(audioCtx.destination);
+    $("micStatus").textContent = "Microphone on at " + audioCtx.sampleRate + " Hz, listening for 1.0 to 2.8 kHz tones";
+    $("btnListen").textContent = "Stop listening";
+  } catch (e) { $("micStatus").textContent = "Microphone unavailable: " + e.message; }
+}
+function stopListening() {
+  if (proc) { proc.disconnect(); proc = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  $("micStatus").textContent = "Microphone off"; $("micMeter").style.width = 0; $("btnListen").textContent = "Start listening for the bank's tone";
+}
+$("btnListen").onclick = () => audioCtx ? stopListening() : startListening();
+
+async function onHeard(hex) {
+  if (!session) return;
+  $("micStatus").textContent = "Tone heard: " + hex.slice(0, 4) + "… checking with the bank over the data link";
+  try {
+    const r = await api(`/api/session/${session.id}/heard`, { code: hex });
+    if (!r.ok) { $("micStatus").innerHTML = `<span class="bad">Tone did not match this session.</span>`; return; }
+    // verify the bank's signature with the pinned key: two-stage confirmation
+    const okSig = await subtle.verify({ name: "ECDSA", hash: "SHA-256" }, bankKey, b64d(r.bankSignature), new TextEncoder().encode(r.text));
+    if (okSig) { $("micStatus").innerHTML = `<span class="ok">Tone matched and bank signature verified with the pinned key.</span>`; }
+    else { $("micStatus").innerHTML = `<span class="bad">Bank signature failed to verify.</span>`; setTick("bad", "Not the bank", "Signature did not match the pinned bank key."); }
+  } catch (e) { $("micStatus").textContent = "Check failed: " + e.message; }
+}
+
+// ---- boot ----
+(async () => {
+  device = await loadDevice();
+  if (device) { showLogin(); }
+})();
+})();
+</script>
+</body>
+</html>
