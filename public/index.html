@@ -245,6 +245,7 @@ $("divert").onchange = async () => { divertOn = $("divert").checked; try { await
 async function login(broken, context) {
   if (!device) return;
   resetSessionView();
+  stopListening();   // a microphone left on from an earlier call must not answer for this one
   setTick("warn", "Working", "Contacting the bank...");
   try { await loginInner(broken, context); }
   catch (e) { setTick("bad", "Something went wrong", e.message); }
