@@ -8,12 +8,15 @@
 // Design constraints: a Twilio call is 8 kHz mu-law with usable audio of
 // roughly 300 to 3400 Hz, so the 6.8 to 8.2 kHz tones used in the earlier
 // WebRTC demo cannot survive. This codec uses 16 tones from 1000 to 2500 Hz,
-// 100 Hz apart, one tone per symbol, 4 bits per symbol, 50 ms per symbol
-// (80 bits per second). A 2800 Hz sync tone marks the start of a frame.
+// 100 Hz apart, one tone per symbol, 4 bits per symbol, 80 ms per symbol
+// (50 bits per second). A 2800 Hz sync tone marks the start of a frame.
+// Symbols are long enough for room echo to die down when the call is played
+// on a speaker and heard by a laptop microphone.
 //
 // Frame layout (symbols): SYNC(200ms) | 2 header symbols | 16 payload
 // symbols (64-bit code) | 2 CRC-8 symbols | SYNC(100ms)
-// Total airtime about 1.3 s.
+// About 1.9 s per frame; a call sends DEFAULT_REPEATS copies 250 ms apart
+// and the decoder combines them.
 //
 // Works in Node (encoder for mu-law injection) and in the browser (decoder
 // on microphone audio at any sample rate) with no dependencies.
@@ -28,11 +31,14 @@
   const TONE_STEP = 100;     // Hz
   const TONE_COUNT = 16;
   const SYNC_FREQ = 2800;    // Hz
-  const SYMBOL_S = 0.05;     // 50 ms
+  const SYMBOL_S = 0.08;     // 80 ms: long enough for room echo of the previous tone to die down
+  const LEAD_SKIP_HOPS = 3;  // ignore the first 30 ms of each symbol (echo of the previous one)
   const SYNC_S = 0.2;
   const TAIL_S = 0.1;
   const HEADER = 0xA5;       // fixed byte, catches gross mis-decodes
   const PAYLOAD_BYTES = 8;   // 64-bit rendezvous code
+  const REPEAT_GAP_S = 0.25; // silence between repeated copies of the frame
+  const DEFAULT_REPEATS = 2; // copies sent on a call; the decoder combines them
 
   function toneFreq(sym) { return TONE_BASE + sym * TONE_STEP; }
 
@@ -111,8 +117,18 @@
     s -= 0x84;
     return (sign ? -s : s) / 32768;
   }
-  function encodeMulaw8k(codeHex, amplitude) {
-    const pcm = encodePCM(codeHex, 8000, amplitude);
+  // The frame repeated `repeats` times with a short silent gap between copies.
+  function encodeRepeatedPCM(codeHex, sampleRate, amplitude, repeats) {
+    repeats = repeats || 1;
+    const one = encodePCM(codeHex, sampleRate, amplitude);
+    const gap = Math.round(REPEAT_GAP_S * sampleRate);
+    const out = new Float32Array(repeats * one.length + (repeats - 1) * gap);
+    for (let r = 0; r < repeats; r++) out.set(one, r * (one.length + gap));
+    return out;
+  }
+
+  function encodeMulaw8k(codeHex, amplitude, repeats) {
+    const pcm = encodeRepeatedPCM(codeHex, 8000, amplitude, repeats);
     const out = new Uint8Array(pcm.length);
     for (let i = 0; i < pcm.length; i++) out[i] = linearToMulaw(pcm[i]);
     return out;
@@ -137,7 +153,7 @@
     opts = opts || {};
     const hop = Math.round(0.01 * sampleRate);          // 10 ms analysis hop
     const win = Math.round(0.04 * sampleRate);          // 40 ms window
-    const symHops = Math.round(SYMBOL_S / 0.01);        // 5 hops per symbol
+    const symHops = Math.round(SYMBOL_S / 0.01);        // hops per symbol (8 at 80 ms)
     const syncHopsNeeded = Math.round((SYNC_S / 0.01) * 0.6);
     const minSNR = opts.minSNR == null ? 4 : opts.minSNR; // tone vs mean of others
     const freqs = [];
@@ -147,6 +163,8 @@
     let state = "idle";      // idle -> sync -> data
     let syncRun = 0;
     let hopVotes = [];       // per-hop best symbol during data
+    const PRE_HOPS = 8;      // hops kept from before the detected end of sync
+    let recent = [];         // rolling per-hop votes while waiting for data
     let lastCode = null, lastTime = 0;
 
     function analyseHop(start) {
@@ -161,29 +179,67 @@
       return { sym: best, symP: bestP, syncP: pS, snr: bestP / meanOthers, syncSnr: pS / (sum / TONE_COUNT + 1e-12) };
     }
 
-    function finishFrame() {
-      // collapse hop votes into symbols by majority within each 5-hop group
-      const nSyms = (1 + PAYLOAD_BYTES + 1) * 2;
-      const syms = [];
+    // Collapse hop votes into per-symbol vote counts. Room echo and the sync
+    // tone's tail can shift where symbols really start, so several grid
+    // offsets are tried and only the centre hops of each symbol are counted.
+    // The bank sends the frame several times; when one copy fails its CRC
+    // (typically a single tone garbled by the mobile codec), its votes are
+    // kept and added to the next copy's, so a bad tone is outvoted.
+    const nSyms = (1 + PAYLOAD_BYTES + 1) * 2;
+    let history = [];             // vote-count arrays from recent failed copies
+    let historyAt = 0;
+
+    function countsAt(offset) {
+      const all = [];
+      let conf = 0;
       for (let s = 0; s < nSyms; s++) {
         const counts = new Array(TONE_COUNT).fill(0);
-        for (let h = 0; h < symHops; h++) {
-          const v = hopVotes[s * symHops + h];
+        for (let h = LEAD_SKIP_HOPS; h < symHops - 1; h++) {
+          const v = hopVotes[offset + s * symHops + h];
           if (v != null && v >= 0) counts[v]++;
         }
-        let b = 0;
-        for (let i = 1; i < TONE_COUNT; i++) if (counts[i] > counts[b]) b = i;
-        syms.push(b);
+        conf += Math.max(...counts);
+        all.push(counts);
       }
+      return { all, conf };
+    }
+
+    function tryCounts(all) {
       const bytes = new Uint8Array(nSyms / 2);
-      for (let i = 0; i < bytes.length; i++) bytes[i] = (syms[2 * i] << 4) | syms[2 * i + 1];
+      for (let s = 0; s < nSyms; s++) {
+        const c = all[s];
+        let b = 0;
+        for (let i = 1; i < TONE_COUNT; i++) if (c[i] > c[b]) b = i;
+        if (c[b] === 0) return null;
+        bytes[s >> 1] |= (s & 1) ? b : (b << 4);
+      }
       const ok = bytes[0] === HEADER && crc8(bytes.subarray(0, bytes.length - 1)) === bytes[bytes.length - 1];
-      if (ok) {
-        const hex = bytesToHex(bytes.subarray(1, 1 + PAYLOAD_BYTES));
-        const now = Date.now();
+      return ok ? bytesToHex(bytes.subarray(1, 1 + PAYLOAD_BYTES)) : null;
+    }
+
+    function finishFrame() {
+      let hex = null, bestCounts = null, bestConf = -1;
+      for (let off = 0; off <= PRE_HOPS - 1 + 7 && !hex; off++) {
+        const { all, conf } = countsAt(off);
+        hex = tryCounts(all);
+        if (conf > bestConf) { bestConf = conf; bestCounts = all; }
+      }
+      const now = Date.now();
+      if (!hex && bestCounts) {
+        if (now - historyAt > 8000) history = [];
+        historyAt = now;
+        history.push(bestCounts);
+        if (history.length > 4) history.shift();
+        if (history.length >= 2) {
+          const sum = history[0].map((_, s) => history.reduce((acc, h) => acc.map((v, i) => v + h[s][i]), new Array(TONE_COUNT).fill(0)));
+          hex = tryCounts(sum);
+        }
+      }
+      if (hex) {
+        history = [];
         if (hex !== lastCode || now - lastTime > 2000) { lastCode = hex; lastTime = now; onCode(hex); }
       }
-      return ok;
+      return !!hex;
     }
 
     return {
@@ -195,18 +251,22 @@
         let start = 0;
         while (start + win <= buf.length) {
           const r = analyseHop(start);
+          if (state !== "data") { recent.push(r.snr > minSNR ? r.sym : -1); if (recent.length > PRE_HOPS) recent.shift(); }
           if (state === "idle" || state === "sync") {
             if (r.syncSnr > minSNR) { syncRun++; state = "sync"; }
             else if (state === "sync") {
               if (syncRun >= syncHopsNeeded) {
                 // sync ended, data begins now
-                state = "data"; hopVotes = [];
+                // room echo stretches the sync tone, so the data may really
+                // have started a few hops earlier: keep those hops too
+                state = "data"; hopVotes = recent.slice(0, -1);
+                while (hopVotes.length < PRE_HOPS - 1) hopVotes.unshift(-1);
                 hopVotes.push(r.snr > minSNR ? r.sym : -1);
               } else { state = "idle"; syncRun = 0; }
             }
           } else if (state === "data") {
-            const nHopsNeeded = (1 + PAYLOAD_BYTES + 1) * 2 * symHops;
-            hopVotes.push(r.snr > minSNR && r.syncSnr < minSNR ? r.sym : -1);
+            const nHopsNeeded = (PRE_HOPS - 1) + (1 + PAYLOAD_BYTES + 1) * 2 * symHops + 7;
+            hopVotes.push(r.snr > minSNR ? r.sym : -1);
             if (hopVotes.length >= nHopsNeeded) {
               finishFrame();
               state = "idle"; syncRun = 0; hopVotes = [];
@@ -216,7 +276,7 @@
         }
         buf = buf.subarray(start);
       },
-      reset() { buf = new Float32Array(0); state = "idle"; syncRun = 0; hopVotes = []; }
+      reset() { buf = new Float32Array(0); state = "idle"; syncRun = 0; hopVotes = []; history = []; recent = []; }
     };
   }
 
@@ -240,7 +300,7 @@
 
   return {
     TONE_BASE, TONE_STEP, TONE_COUNT, SYNC_FREQ, SYMBOL_S, SYNC_S,
-    encodePCM, encodeMulaw8k, linearToMulaw, mulawToLinear,
+    encodePCM, encodeRepeatedPCM, encodeMulaw8k, DEFAULT_REPEATS, linearToMulaw, mulawToLinear,
     createDecoder, decodePCM, randomCodeHex, crc8, frameSymbols,
     airtimeSeconds: SYNC_S + (1 + PAYLOAD_BYTES + 1) * 2 * SYMBOL_S + TAIL_S
   };
