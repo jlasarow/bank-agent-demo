@@ -13,6 +13,7 @@ const express = require("express");
 const { WebSocketServer } = require("ws");
 const trust = require("./lib/trust");
 const tel = require("./lib/telephony");
+const assistant = require("./lib/assistant");
 
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -24,6 +25,9 @@ app.get("/healthz", (req, res) => res.send("ok"));
 // ---- bank identity ----
 app.get("/api/bank-key", (req, res) => res.json({ name: "Demo Bank", publicJwk: trust.bankPublicJwk() }));
 
+// ---- what this server can do (the page hides the divert toggle if unavailable) ----
+app.get("/api/config", (req, res) => res.json({ telephony: tel.configured(), divertAvailable: tel.divertAvailable() && assistant.assistantReady() }));
+
 // ---- device enrolment ----
 app.post("/api/enrol", (req, res) => {
   try { const d = trust.enrol(req.body); res.json({ ok: true, device: { deviceId: d.deviceId, keyVersion: d.keyVersion, enrolledAt: d.enrolledAt } }); }
@@ -33,7 +37,7 @@ app.post("/api/enrol", (req, res) => {
 // ---- login: challenge then signature ----
 app.post("/api/login/start", async (req, res) => {
   try {
-    const s = await trust.startLogin(req.body.deviceId, req.body.context);
+    const s = await trust.startLogin(req.body.deviceId, req.body.context, { divert: !!req.body.divert });
     res.json({ sessionId: s.id, challenge: s.challenge, textToSign: `login:${s.id}:${s.challenge}` });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -60,6 +64,18 @@ app.post("/api/session/:id/heard", async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// play the recording of a diverted (agent-to-agent) call
+app.get("/api/session/:id/recording", async (req, res) => {
+  const s = trust.getSession(req.params.id);
+  if (!s || !s.recording) return res.status(404).json({ error: "no recording" });
+  try {
+    const r = await tel.fetchRecording(s);
+    if (!r) return res.status(502).json({ error: "recording not available yet" });
+    res.set("content-type", "audio/mpeg");
+    res.send(Buffer.from(await r.arrayBuffer()));
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
 app.get("/api/session/:id", (req, res) => {
   const s = trust.getSession(req.params.id);
   if (!s) return res.status(404).json({ error: "unknown session" });
@@ -72,6 +88,17 @@ app.post("/twilio/status", async (req, res) => {
   res.sendStatus(204);
 });
 
+// the assistant number rings: hand the call to the customer agent
+app.post("/twilio/assistant-inbound", (req, res) => {
+  const host = process.env.PUBLIC_HOST || process.env.RENDER_EXTERNAL_HOSTNAME;
+  res.type("text/xml").send(assistant.inboundTwiml(tel.claimPendingDivert(), host));
+});
+
+app.post("/twilio/recording", async (req, res) => {
+  await tel.onRecording(req.query.session, req.body);
+  res.sendStatus(204);
+});
+
 // ---- server boot ----
 (async () => {
   await trust.initBankKey();
@@ -80,13 +107,18 @@ app.post("/twilio/status", async (req, res) => {
   // call never blocks the server from coming up
   tel.configureAgent().then(cfg => console.log("agent configure:", JSON.stringify(cfg)))
     .catch(e => console.log("agent configure failed:", e.message));
+  assistant.ensureAssistantAgent().then(r => console.log("assistant agent:", JSON.stringify(r)))
+    .catch(e => console.log("assistant agent failed:", e.message));
+  tel.configureAssistantNumber().then(r => console.log("assistant number:", JSON.stringify(r)))
+    .catch(e => console.log("assistant number failed:", e.message));
 
   const wss = new WebSocketServer({ noServer: true });
   server.on("upgrade", (req, socket, head) => {
     const url = new URL(req.url, "http://x");
-    if (url.pathname === "/media" || url.pathname === "/ws") {
+    if (url.pathname === "/media" || url.pathname === "/assistant-media" || url.pathname === "/ws") {
       wss.handleUpgrade(req, socket, head, ws => {
         if (url.pathname === "/media") tel.handleMediaStream(ws);
+        else if (url.pathname === "/assistant-media") assistant.handleAssistantStream(ws);
         else handleAppSocket(ws, url.searchParams.get("session"));
       });
     } else socket.destroy();

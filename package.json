@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "test": "node test/codec.test.js && node test/bridge.test.js",
+    "test": "node test/codec.test.js && node test/bridge.test.js && node test/divert.test.js",
     "sync-codec": "cp lib/tonecodec.js public/lib/tonecodec.js"
   },
   "keywords": [],

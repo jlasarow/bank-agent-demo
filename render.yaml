@@ -15,5 +15,7 @@ services:
         sync: false
       - key: TWILIO_FROM_NUMBER
         sync: false
+      - key: TWILIO_ASSISTANT_NUMBER
+        sync: false
       - key: ELEVENLABS_API_KEY
         sync: false

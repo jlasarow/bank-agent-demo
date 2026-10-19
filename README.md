@@ -42,6 +42,7 @@ secret environment variables in the Render dashboard:
     TWILIO_ACCOUNT_SID    from the Twilio console home
     TWILIO_AUTH_TOKEN     same place, click Show
     TWILIO_FROM_NUMBER    the purchased US voice number, E.164, e.g. +14135551234
+    TWILIO_ASSISTANT_NUMBER  second number, answered by the customer's AI
     ELEVENLABS_API_KEY    ElevenLabs profile menu, API Keys
     ELEVENLABS_AGENT_ID   already set in render.yaml
 
@@ -60,13 +61,31 @@ answer the agent's two questions normally. The log fills in as you go.
     server.js           HTTP, WebSocket upgrade, API routes
     lib/trust.js        enrolment, challenges, signatures, signed audit chain
     lib/telephony.js    Twilio outbound call, media stream bridge, ElevenLabs agent, tone injection
+    lib/assistant.js    customer-side AI agent for diverted calls, server-side tone decode
     lib/analysis.js     Patent 2 measurements
     lib/tonecodec.js    narrowband codec shared by server and browser (copy in public/lib)
     public/index.html   the phone screen
     test/               codec and bridge self-tests
 
-## Phase two
+## Divert to my AI
 
-Inbound diversion: the customer forwards declined calls to the Twilio number,
-the agent verifies the caller, then conferences the customer in with a muted
-listen-in option. Same bridge, different TwiML.
+Tick "Divert bank calls to my AI" on the page. A flagged login then makes the
+bank's agent dial `TWILIO_ASSISTANT_NUMBER` instead of the handset. That
+number is answered by a second ElevenLabs agent speaking for the customer
+(lib/assistant.js). It decodes the rendezvous tone straight from the call
+audio, confirms the code over the data link, checks the bank's signature
+against the pinned key, and only then treats the caller as Demo Bank. It
+never gives out PINs, codes or card details either way. A forged or missing
+tone is rejected after 30 seconds.
+
+On boot the server finds or creates the assistant agent in ElevenLabs
+(named "Untapped AI - Customer Assistant") and points the assistant number's
+voice webhook at /twilio/assistant-inbound, so neither needs console setup.
+Only these agent-to-agent calls are recorded; the page shows a player once
+Twilio has the recording.
+
+Real-world version: set conditional call forwarding (busy, no answer,
+unreachable) on the customer's mobile to the assistant number.
+
+Note: phones usually switch off the browser microphone during a call, so in
+the handset flow keep this page open on a second device next to the phone.
