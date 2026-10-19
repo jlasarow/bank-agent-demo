@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: bank-agent-demo
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: ELEVENLABS_AGENT_ID
+        value: agent_0401m59rx94zetgtbx4gtztk3qd0
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false

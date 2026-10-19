@@ -1,0 +1,27 @@
+{
+  "name": "bank-agent-demo",
+  "version": "0.1.0",
+  "description": "Untapped AI bank agent demo: the bank calls the customer, the handset proves it is the bank.",
+  "main": "server.js",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/codec.test.js && node test/bridge.test.js",
+    "sync-codec": "cp lib/tonecodec.js public/lib/tonecodec.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.3.0",
+    "twilio": "^6.2.0",
+    "ws": "^8.22.0"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  }
+}
