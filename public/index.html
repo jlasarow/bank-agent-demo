@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Demo Bank</title>
+<title>Untapped AI Demo</title>
 <meta name="description" content="Untapped AI bank agent demonstration: the bank calls you, your phone proves it is the bank.">
 <style>
   :root{--bg:#0f1b2d;--card:#162741;--ink:#eef3fa;--mute:#9fb0c8;--line:#24375a;--ok:#2fd27a;--warn:#f4b942;--bad:#ff5c5c;--accent:#4ea1ff}
@@ -45,8 +45,7 @@
 </style>
 </head>
 <body>
-<h1>Demo Bank</h1>
-<div class="sub">Untapped AI voice trust demonstration. Not a real bank.</div>
+<h1>Untapped AI Demo</h1>
 
 <div class="banner" id="banner">Demo Bank is calling you now to confirm a change. Answer on speaker so this screen can hear the call.</div>
 
@@ -61,9 +60,7 @@
 </div>
 
 <div class="card" id="loginCard" style="display:none">
-  <div class="big">2. Log in</div>
-  <div class="small">A real login signs the bank's challenge with the key in this phone. The broken-key button simulates a phone whose biometrics changed, or a SIM swapped onto a stranger's handset. That flags the login and the bank calls you.</div>
-  <div class="row" style="margin-top:10px">
+  <div class="row">
     <button id="btnLogin">Log in with my key</button>
     <button id="btnBroken" class="danger">Log in with a broken key</button>
   </div>
