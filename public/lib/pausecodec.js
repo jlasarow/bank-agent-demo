@@ -19,10 +19,11 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  // The sentence the bank speaks. 19 words, so 18 gaps carry 18 bits.
-  const PHRASE = "This is Demo Bank and your app is now checking the rhythm of these words to confirm the call";
+  // The sentence the bank speaks: small talk about the weather, so nothing in
+  // the words gives away that it is a check. 19 words, so 18 gaps carry 18 bits.
+  const PHRASE = "It is a lovely sunny day here in Johannesburg while down in Cape Town it is cool and windy";
   const SHORT_MS = 180;          // gap for a 0 bit
-  const LONG_MS = 620;           // gap for a 1 bit
+  const LONG_MS = 520;           // gap for a 1 bit (a natural pause, not a stall)
   const SPLIT_MS = 500;          // fallback split if a sentence has only one kind of gap
   const MIN_GAP_MS = 120;        // shorter silences are inside words, not gaps
   const UTTERANCE_END_MS = 1100; // a silence this long ends the sentence
