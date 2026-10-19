@@ -62,11 +62,11 @@ require("../server.js");
   const iv = setInterval(() => {
     const el = Date.now() - t0;
     let frame = silence;
-    if (el > 3600 && replyPos < replyMu.length) { frame = replyMu.subarray(replyPos, replyPos + 160); replyPos += 160; }
+    if (el > 7200 && replyPos < replyMu.length) { frame = replyMu.subarray(replyPos, replyPos + 160); replyPos += 160; }
     if (tw.readyState === WebSocket.OPEN) tw.send(JSON.stringify({ event: "media", media: { payload: frame.toString("base64") } }));
   }, 20);
 
-  await new Promise(r => setTimeout(r, 6500));
+  await new Promise(r => setTimeout(r, 10000));
   clearInterval(iv);
   const all = Buffer.concat(outbound);
   const pcm = new Float32Array(all.length); for (let i = 0; i < all.length; i++) pcm[i] = C.mulawToLinear(all[i]);
