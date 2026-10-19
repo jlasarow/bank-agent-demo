@@ -94,6 +94,12 @@ const waitFor = async (fn, ms) => { const end = Date.now() + ms; while (Date.now
   // second goodbye, customer quiet
   const t0 = Date.now();
   agentSays("You're welcome. Goodbye.", 1000);
+  // the other side answers the goodbye with its own; that must not restart the call
+  await sleep(1300);
+  talking = true;
+  agentWs.send(JSON.stringify({ type: "user_transcript", user_transcription_event: { user_transcript: "Thanks, goodbye." } }));
+  await sleep(600);
+  talking = false;
   const ended = await waitFor(() => hungUpAt !== null, 12000);
   const afterMs = hungUpAt - t0;
 
@@ -104,7 +110,8 @@ const waitFor = async (fn, ms) => { const end = Date.now() + ms; while (Date.now
   console.log("ended after second goodbye:", ended, afterMs + " ms", hangReason);
   const pass = introFirst && types().indexOf("bank_greeting") < types().indexOf("agent_connected") &&
     types().indexOf("tone_sent") < types().indexOf("agent_connected") &&
-    stayedUp && ended && afterMs >= 3800 && afterMs <= 7000;
+    stayedUp && ended && afterMs >= 3800 && afterMs <= 9000 &&
+    types().filter(t => t === "hangup_cancelled").length === 1;
   console.log(pass ? "PASS" : "FAIL");
   process.exit(pass ? 0 : 1);
 })().catch(e => { console.error("FAIL", e); process.exit(1); });
