@@ -75,9 +75,11 @@ app.post("/twilio/status", async (req, res) => {
 // ---- server boot ----
 (async () => {
   await trust.initBankKey();
-  const cfg = await tel.configureAgent().catch(e => ({ error: e.message }));
-  console.log("agent configure:", JSON.stringify(cfg));
   const server = app.listen(PORT, () => console.log("Bank Agent Demo listening on " + PORT, "telephony:", tel.configured() ? "configured" : "not configured"));
+  // configure the ElevenLabs agent in the background so a slow or failed
+  // call never blocks the server from coming up
+  tel.configureAgent().then(cfg => console.log("agent configure:", JSON.stringify(cfg)))
+    .catch(e => console.log("agent configure failed:", e.message));
 
   const wss = new WebSocketServer({ noServer: true });
   server.on("upgrade", (req, socket, head) => {
