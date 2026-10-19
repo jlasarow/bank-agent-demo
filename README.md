@@ -72,10 +72,11 @@ answer the agent's two questions normally. The log fills in as you go.
 ## Proof by pauses between words (Patent 2)
 
 Choose "Pauses between words" on the page. After the greeting the bank reads
-one ordinary sentence in its agent's voice: "This is Demo Bank and your app
-is now checking the rhythm of these words to confirm the call". Nothing in
-the words is special. The 18 gaps between them are each short (180 ms) or
-long (620 ms), and that pattern is derived from the session secret with
+one ordinary sentence of small talk in its agent's voice: "It is a lovely
+sunny day here in Johannesburg while down in Cape Town it is cool and windy".
+Nothing in the words is special. The 18 gaps between them are each short
+(180 ms) or long (520 ms), cut at the quietest point between words with a
+short fade so the speech stays clean, and that pattern is derived from the session secret with
 HMAC-SHA256, so it differs on every call. The listener measures the gaps
 (lib/pausecodec.js, shared by the browser and the server) and reports them
 over the data link; the bank compares them with the pattern it expected,
@@ -86,6 +87,21 @@ service fails the call falls back to tones.
 Measured gaps run longer than the inserted ones, so the short/long split is
 taken from each sentence's own gaps rather than a fixed threshold. Heavy
 background noise fills the gaps; in a very noisy room the tone is more robust.
+
+## How a call runs
+
+1. The server plays the opening itself, in the agent's voice: "Hello Judd,
+   this is Demo Bank calling." followed by the proof (the weather sentence or
+   the tone). The ElevenLabs agent is connected only as that finishes, so it
+   never sits through audio it didn't say.
+2. The agent asks whether the login was the customer, listens, and follows
+   the decision rules in `BANK_PROMPT` (lib/telephony.js). The prompt, first
+   message and patient turn-taking settings are applied to the agent at every
+   boot, so this repo is the source of truth, not the ElevenLabs dashboard.
+3. The agent only says "Goodbye" once the customer has nothing else. The
+   server hangs up only after that goodbye has finished playing and the
+   customer has been quiet for 3 seconds; if the customer speaks, the hang-up
+   is cancelled and the conversation carries on. Calls are capped at 4 minutes.
 
 ## Divert to my AI
 
