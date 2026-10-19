@@ -28,19 +28,19 @@ function word(ms) {
 }
 function mulaw(f32) { return Buffer.from(Array.from(f32, v => C.linearToMulaw(v))); }
 
-// stub speech service: the sentence, words 280 ms, 30 ms natural gaps, with timings
-function speech() {
-  const words = P.PHRASE.split(" ");
-  const parts = [], chars = [], st = [], en = [];
-  let t = 0;
-  words.forEach((w, wi) => {
-    const dur = 0.28;
-    for (let k = 0; k < w.length; k++) { chars.push(w[k]); st.push(t + dur * k / w.length); en.push(t + dur * (k + 1) / w.length); }
-    parts.push(word(dur * 1000)); t += dur;
-    if (wi < words.length - 1) { chars.push(" "); st.push(t); en.push(t + 0.03); parts.push(new Float32Array(240)); t += 0.03; }
-  });
+// stub speech service, behaving like the real one: each phrase is spoken as
+// words 280 ms long with 30 ms natural gaps, and every <break time="x s" />
+// tag becomes that much silence plus a little for the comma.
+function speech(text) {
+  const parts = [];
+  const pieces = String(text).split(/<break time="([\d.]+)s" \/>/);
+  for (let k = 0; k < pieces.length; k++) {
+    if (k % 2 === 1) { parts.push(new Float32Array(Math.round((Number(pieces[k]) + 0.08) * 8000))); continue; }
+    const words = pieces[k].replace(/[,.]/g, " ").trim().split(/\s+/).filter(Boolean);
+    words.forEach((w, wi) => { parts.push(word(280)); if (wi < words.length - 1) parts.push(new Float32Array(240)); });
+  }
   const all = new Float32Array(parts.reduce((n, p) => n + p.length, 0)); let o = 0; for (const p of parts) { all.set(p, o); o += p.length; }
-  return { audio_base64: mulaw(all).toString("base64"), alignment: { characters: chars, character_start_times_seconds: st, character_end_times_seconds: en } };
+  return mulaw(all);
 }
 
 // stub agents: the bank greets; the customer's AI says one line; both record contextual updates
@@ -73,7 +73,10 @@ stubAgent(3993, false);
 global.fetch = async (url, opts) => {
   const u = String(url);
   if (u.includes("get-signed-url")) return { ok: true, json: async () => ({ signed_url: u.includes("agent_bank") ? "ws://localhost:3992" : "ws://localhost:3993" }) };
-  if (u.includes("/text-to-speech/")) return { ok: true, json: async () => speech() };
+  if (u.includes("/text-to-speech/")) {
+    const audio = speech(JSON.parse(opts.body).text);
+    return { ok: true, json: async () => ({ audio_base64: audio.toString("base64") }), arrayBuffer: async () => audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.length) };
+  }
   if (u.includes("/convai/agents/") && (!opts || !opts.method)) return { ok: true, json: async () => ({ conversation_config: { tts: { voice_id: "v1" } } }) };
   return { ok: true, status: 200, json: async () => ({}), text: async () => "" };
 };
@@ -86,6 +89,9 @@ async function runCall(label) {
   const { webcrypto } = require("crypto");
   const kp = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
   trust.enrol({ deviceId: "d-" + label, phone: "+27000000000", name: "Test", publicJwk: await webcrypto.subtle.exportKey("jwk", kp.publicKey) });
+  // the customer's phone signs a permission for its AI
+  const delegationSig = Buffer.from(await webcrypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, kp.privateKey, Buffer.from(trust.delegationText("d-" + label)))).toString("base64");
+  await trust.registerDelegation("d-" + label, delegationSig);
   const s = await trust.startLogin("d-" + label, "website login", { divert: true, method: "pauses" });
   // a browser watching the session
   let audioChunks = 0;
@@ -129,6 +135,9 @@ async function runCall(label) {
     good.types.includes("pause_sentence_sent") && good.types.includes("pauses_matched") &&
     good.types.includes("customer_agent_verified_bank") && good.s.bankVerified === true &&
     good.audioChunks > 10 &&
+    good.types.includes("assistant_authorised") && good.types.includes("customer_agent_sent_tone") &&
+    good.types.includes("customer_agent_verified_by_bank") && good.types.includes("ai_to_ai_verified") &&
+    !bad.types.includes("customer_agent_verified_by_bank") &&
     !!hung && /said goodbye/.test(hung.reason) && good.types.includes("recording_ready") &&
     /———/.test((good.s.log.find(e => e.type === "pauses_matched") || {}).reading || "") &&
     bad.types.includes("customer_agent_rejected_caller") && !bad.s.bankVerified &&
