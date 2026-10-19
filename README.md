@@ -69,20 +69,23 @@ answer the agent's two questions normally. The log fills in as you go.
     public/index.html   the phone screen
     test/               codec and bridge self-tests
 
-## Proof by pauses between words (Patent 2)
+## Proof by pauses in the bank's weather update (Patent 2)
 
-Choose "Pauses between words" on the page. After the greeting the bank reads
-one ordinary sentence of small talk in its agent's voice: "It is a lovely
-sunny day here in Johannesburg while down in Cape Town it is cool and windy".
-Nothing in the words is special. The 18 gaps between them are each short
-(180 ms) or long (520 ms), cut at the quietest point between words with a
-short fade so the speech stays clean, and that pattern is derived from the session secret with
-HMAC-SHA256, so it differs on every call. The listener measures the gaps
-(lib/pausecodec.js, shared by the browser and the server) and reports them
-over the data link; the bank compares them with the pattern it expected,
-tolerating up to two misjudged gaps, and signs only if they match. A replayed
-recording carries an old session's pattern and is rejected. If the speech
-service fails the call falls back to tones.
+Choose "Pauses in the bank's weather update" on the page. After the greeting
+the bank gives a quick weather update in its agent's voice, read as 15 short
+phrases: "Quick weather update, in Johannesburg, it's sunny and warm ... down
+in Cape Town, it's cloudy ... enjoy your day." Nothing in the words is special.
+The 14 pauses between the phrases are each short (0.2 s) or long (0.6 s), and
+that pattern is derived from the session secret with HMAC-SHA256, so it
+differs on every call. The pauses are made by the voice engine itself through
+`<break>` tags, so every word ends naturally and nothing is cut or spliced; it
+sounds like a newsreader pacing a forecast. The listener (lib/pausecodec.js, shared by the browser and the server)
+measures the pauses and reports them over the data link; the bank compares
+them with the pattern it expected, tolerating up to two misjudged pauses, and
+signs only if they match. A replayed recording carries an old session's
+pattern and is rejected. If the speech service fails the call falls back to
+tones. `GET /api/demo/pause-check` generates an update for a throwaway session
+and decodes it (`?audio=1` returns the audio), to check the voice end to end.
 
 Measured gaps run longer than the inserted ones, so the short/long split is
 taken from each sentence's own gaps rather than a fixed threshold. Heavy
@@ -122,6 +125,17 @@ On boot the server finds or creates the assistant agent in ElevenLabs
 voice webhook at /twilio/assistant-inbound, so neither needs console setup.
 Only these agent-to-agent calls are recorded; the page shows a player once
 Twilio has the recording.
+
+### AI talking to AI: the customer's AI proves itself too
+
+When divert is on, the page signs a permission for the customer's AI with the
+phone's enrolled key (`delegate:<deviceId>:customer-ai`). Once the customer's
+AI has verified the bank, it asks for this call's assistant code; the bank
+releases it only if that signed permission checks out against the enrolled
+key. The AI plays the code as a short tone; the bank's leg decodes it from the
+call audio and matches it, and the bank's agent is told it is speaking to the
+customer's authorised AI. The page's "AI talking to AI" block shows both
+checks, and the log records `ai_to_ai_verified` when both directions pass.
 
 Real-world version: set conditional call forwarding (busy, no answer,
 unreachable) on the customer's mobile to the assistant number.

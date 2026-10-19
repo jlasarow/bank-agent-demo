@@ -65,6 +65,34 @@ app.post("/api/session/:id/heard", async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// the customer's phone signs a permission for its AI assistant
+app.post("/api/delegate", async (req, res) => {
+  try { res.json(await trust.registerDelegation(req.body.deviceId, req.body.signature)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get("/api/delegate-text/:deviceId", (req, res) => res.json({ text: trust.delegationText(req.params.deviceId) }));
+
+// Generate the bank's weather update for a throwaway session and decode it.
+// ?audio=1 returns the audio itself as a WAV so it can be listened to.
+let lastSelfTest = 0;
+app.get("/api/demo/pause-check", async (req, res) => {
+  if (Date.now() - lastSelfTest < 5000) return res.status(429).json({ error: "wait a few seconds" });
+  lastSelfTest = Date.now();
+  try {
+    const r = await tel.pauseSelfTest();
+    if (req.query.audio) {
+      const pcm = Buffer.alloc(r.audio.length * 2);
+      for (let i = 0; i < r.audio.length; i++) pcm.writeInt16LE(Math.round(require("./lib/tonecodec").mulawToLinear(r.audio[i]) * 32767), i * 2);
+      const h = Buffer.alloc(44);
+      h.write("RIFF", 0); h.writeUInt32LE(36 + pcm.length, 4); h.write("WAVE", 8); h.write("fmt ", 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
+      h.writeUInt32LE(8000, 24); h.writeUInt32LE(16000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write("data", 36); h.writeUInt32LE(pcm.length, 40);
+      res.setHeader("content-type", "audio/wav"); return res.send(Buffer.concat([h, pcm]));
+    }
+    const { audio, ...rest } = r;
+    res.json(rest);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
 // handset measured the gaps between the bank's words and reports them (Patent 2)
 app.post("/api/session/:id/heard-pauses", async (req, res) => {
   try { res.json(await trust.confirmHeardPauses(req.params.id, req.body.gapsMs)); }
