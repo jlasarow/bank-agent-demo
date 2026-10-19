@@ -49,7 +49,14 @@ function stubAgent(port, greet) {
   const wss = new WebSocketServer({ port });
   wss.on("connection", ws => ws.on("message", raw => {
     const m = JSON.parse(raw);
-    if (m.type === "contextual_update") updates.push(m.text);
+    if (m.type === "contextual_update") {
+      updates.push(m.text);
+      if (!greet && m.text.startsWith("CALLER VERIFIED")) {   // the customer's AI wraps up
+        ws.send(JSON.stringify({ type: "agent_response", agent_response_event: { agent_response: "Thank you, the app has the alert. Goodbye." } }));
+        const g = mulaw(word(700));
+        for (let i = 0; i < g.length; i += 800) ws.send(JSON.stringify({ type: "audio", audio_event: { audio_base_64: g.subarray(i, i + 800).toString("base64") } }));
+      }
+    }
     if (m.type === "conversation_initiation_client_data") {
       ws.send(JSON.stringify({ type: "conversation_initiation_metadata", conversation_initiation_metadata_event: { conversation_id: "c" + port, agent_output_audio_format: "ulaw_8000" } }));
       if (greet) {
@@ -97,7 +104,14 @@ async function runCall(label) {
   await new Promise(r => setTimeout(r, 800));
 
   const good = await runCall("good");
+  // the AI said goodbye: the call must end on its own, not loop
+  const hangBy = Date.now() + 15000;
+  while (Date.now() < hangBy && !good.s.log.some(e => e.type === "call_hung_up")) await new Promise(r => setTimeout(r, 250));
+  const hung = good.s.log.find(e => e.type === "call_hung_up");
+  good.types = good.s.log.map(e => e.type);
   console.log("genuine:", good.types.join(" > "));
+  console.log("hung up:", hung && hung.reason);
+  console.log("reading:", (good.s.log.find(e => e.type === "pauses_matched") || {}).reading);
   const sent = good.s.log.find(e => e.type === "pause_sentence_sent");
   const matched = good.s.log.find(e => e.type === "pauses_matched");
   console.log("sentence airtime:", sent && sent.airtimeMs, "ms; heard", matched && matched.heard, "expected", matched && matched.expected, "errors", matched && matched.errors);
@@ -115,6 +129,8 @@ async function runCall(label) {
     good.types.includes("pause_sentence_sent") && good.types.includes("pauses_matched") &&
     good.types.includes("customer_agent_verified_bank") && good.s.bankVerified === true &&
     good.audioChunks > 10 &&
+    !!hung && /said goodbye/.test(hung.reason) && good.types.includes("recording_ready") &&
+    /———/.test((good.s.log.find(e => e.type === "pauses_matched") || {}).reading || "") &&
     bad.types.includes("customer_agent_rejected_caller") && !bad.s.bankVerified &&
     updates.some(u => u.startsWith("CALLER VERIFIED")) && updates.some(u => u.startsWith("CALLER NOT VERIFIED"));
   console.log(pass ? "PASS" : "FAIL");
