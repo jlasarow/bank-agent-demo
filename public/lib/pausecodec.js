@@ -89,6 +89,30 @@
     return { ok: Math.abs(heardBits.length - expectedBits.length) <= MAX_DISTANCE && dist <= MAX_DISTANCE, distance: dist };
   }
 
+  // Matching on the measured gaps themselves, used for what a microphone in
+  // the room hears through a phone speaker. A quiet consonant can split one
+  // phrase in two and add a short gap; that extra gap is cheap to drop (half
+  // an error), because it is short and in the wrong place, not a forged bit.
+  // A missed gap or a misjudged gap costs a full error, as before.
+  const MAX_GAP_COST = 2.5;
+  function matchGaps(gapsMs, expectedBits) {
+    const g = gapsMs.filter(v => v >= MIN_GAP_MS);
+    const split = splitPoint(g);
+    const bits = g.map(v => (v >= split ? 1 : 0));
+    const n = g.length, m = expectedBits.length, d = [];
+    for (let i = 0; i <= n; i++) d[i] = new Array(m + 1).fill(0);
+    for (let i = 1; i <= n; i++) d[i][0] = d[i - 1][0] + (g[i - 1] < split ? 0.5 : 1);
+    for (let j = 1; j <= m; j++) d[0][j] = j;
+    for (let i = 1; i <= n; i++)
+      for (let j = 1; j <= m; j++)
+        d[i][j] = Math.min(
+          d[i - 1][j] + (g[i - 1] < split ? 0.5 : 1),
+          d[i][j - 1] + 1,
+          d[i - 1][j - 1] + (bits[i - 1] === expectedBits[j - 1] ? 0 : 1));
+    const cost = d[n][m];
+    return { ok: Math.abs(n - m) <= 3 && cost <= MAX_GAP_COST, distance: cost, bits };
+  }
+
   // ---- streaming detector ----
   // feed(Float32Array) with audio at sampleRate; onUtterance({ gapsMs, words })
   // fires after each stretch of speech that ends with a long silence.
@@ -168,6 +192,6 @@
 
   return {
     PHRASES, PHRASE, speechText, SHORT_MS, LONG_MS, SPLIT_MS, MIN_GAP_MS, UTTERANCE_END_MS, LEAD_MS, TAIL_MS, MAX_DISTANCE,
-    gapCount, bitsToGapsMs, gapsToBits, splitPoint, distance, match, createDetector
+    gapCount, bitsToGapsMs, gapsToBits, splitPoint, distance, match, matchGaps, MAX_GAP_COST, createDetector
   };
 });
