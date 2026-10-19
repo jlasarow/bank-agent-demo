@@ -41,7 +41,7 @@ require("../server.js");
 function lineAudio(codeHex) {
   // 1 s of greeting hum, the tone, then 1 s of quiet line noise
   const greet = new Float32Array(8000).map((_, i) => 0.25 * Math.sin(2 * Math.PI * 220 * i / 8000));
-  const tone = C.encodePCM(codeHex, 8000, 0.5);
+  const tone = C.encodeRepeatedPCM(codeHex, 8000, 0.5, C.DEFAULT_REPEATS);   // two copies, as the bank sends
   const tail = new Float32Array(8000).map(() => (Math.random() - 0.5) * 0.01);
   const all = new Float32Array(greet.length + tone.length + tail.length);
   all.set(greet); all.set(tone, greet.length); all.set(tail, greet.length + tone.length);
@@ -79,6 +79,8 @@ async function runCall(session, codeHex) {
   const bad = await trust.startLogin("d", "app", { divert: true });
   await trust.finishLogin(bad.id, null);
   await runCall(bad, C.randomCodeHex());
+  // a misread tone gets a 4 s grace period for the bank's second copy
+  for (let t = 0; t < 30 && !bad.log.some(e => e.type === "customer_agent_rejected_caller"); t++) await new Promise(r => setTimeout(r, 250));
   const badTypes = bad.log.map(e => e.type);
   console.log("forged: ", badTypes.join(" > "));
   console.log("updates to assistant:", updates.map(u => u.split(".")[0]).join(" | "));
