@@ -65,6 +65,18 @@ app.post("/api/session/:id/heard", async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// a customer's AI assistant heard the tone on a call and asks the bank to
+// confirm it by code alone (no session id): signed proof if it is live
+app.post("/api/verify-heard", async (req, res) => {
+  try {
+    const code = typeof (req.body && req.body.code) === "string" ? req.body.code.toLowerCase() : "";
+    const s = trust.findSessionByCode(code);
+    if (!s) return res.json({ ok: false });
+    const r = await trust.confirmHeardCode(s.id, code, (req.body && req.body.heardBy) || "assistant");
+    res.json({ ...r, bank: "Demo Bank", sessionId: s.id });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // the customer's phone signs a permission for its AI assistant
 app.post("/api/delegate", async (req, res) => {
   try { res.json(await trust.registerDelegation(req.body.deviceId, req.body.signature)); }
